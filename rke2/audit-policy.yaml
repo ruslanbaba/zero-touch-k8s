@@ -1,0 +1,128 @@
+# RKE2 Audit Policy for Factory Floor Kubernetes
+# Compliance-focused audit logging for manufacturing environments
+
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+# Log factory application namespace activities at RequestResponse level
+- level: RequestResponse
+  namespaces: ["factory-apps", "factory-monitoring", "factory-security"]
+  resources:
+  - group: ""
+    resources: ["pods", "services", "configmaps", "secrets"]
+  - group: "apps"
+    resources: ["deployments", "daemonsets", "replicasets"]
+
+# Log all secret access for security compliance
+- level: RequestResponse
+  resources:
+  - group: ""
+    resources: ["secrets"]
+
+# Log all authentication and authorization events
+- level: RequestResponse
+  resources:
+  - group: "rbac.authorization.k8s.io"
+    resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+
+# Log all admission controller events
+- level: RequestResponse
+  resources:
+  - group: "admissionregistration.k8s.io"
+    resources: ["*"]
+
+# Log certificate and TLS activities
+- level: RequestResponse
+  resources:
+  - group: "certificates.k8s.io"
+    resources: ["*"]
+
+# Log network policy changes
+- level: RequestResponse
+  resources:
+  - group: "networking.k8s.io"
+    resources: ["networkpolicies"]
+
+# Log persistent volume operations
+- level: RequestResponse
+  resources:
+  - group: ""
+    resources: ["persistentvolumes", "persistentvolumeclaims"]
+
+# Log service account token requests
+- level: RequestResponse
+  resources:
+  - group: ""
+    resources: ["serviceaccounts/token"]
+
+# Log exec and portforward for security monitoring
+- level: RequestResponse
+  resources:
+  - group: ""
+    resources: ["pods/exec", "pods/portforward", "pods/proxy"]
+
+# Log factory-specific custom resources
+- level: RequestResponse
+  resources:
+  - group: "factory.company.com"
+    resources: ["*"]
+
+# Log privileged pod operations
+- level: RequestResponse
+  resources:
+  - group: ""
+    resources: ["pods"]
+  namespaces: ["factory-apps"]
+  omitStages: ["RequestReceived"]
+
+# Log all delete operations for audit trail
+- level: RequestResponse
+  verbs: ["delete"]
+
+# Log metadata for all other operations in factory namespaces
+- level: Metadata
+  namespaces: ["factory-apps", "factory-monitoring", "factory-security"]
+
+# Log metadata for system namespace operations
+- level: Metadata
+  namespaces: ["kube-system", "kube-public", "kube-node-lease"]
+
+# Don't log readonly operations on non-sensitive resources
+- level: None
+  verbs: ["get", "list", "watch"]
+  resources:
+  - group: ""
+    resources: ["events", "nodes", "pods/status"]
+
+# Don't log health check requests
+- level: None
+  users: ["system:anonymous"]
+  verbs: ["get"]
+  resources:
+  - group: ""
+    resources: ["healthz*", "livez*", "readyz*"]
+
+# Don't log system component health checks
+- level: None
+  userGroups: ["system:nodes"]
+  verbs: ["get"]
+  resources:
+  - group: ""
+    resources: ["nodes", "nodes/status"]
+
+# Don't log kubelet operations
+- level: None
+  users:
+  - "system:node:*"
+  verbs: ["get", "patch", "update"]
+  resources:
+  - group: ""
+    resources: ["nodes", "nodes/status"]
+
+# Factory-specific exclusions
+- level: None
+  users: ["system:serviceaccount:factory-apps:factory-metrics"]
+  verbs: ["get", "list"]
+  resources:
+  - group: ""
+    resources: ["pods", "nodes"]

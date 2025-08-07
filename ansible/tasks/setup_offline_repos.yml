@@ -1,0 +1,85 @@
+---
+# Setup offline package repositories for air-gapped environment
+- name: Create local repository directory
+  file:
+    path: /opt/offline-repos
+    state: directory
+    mode: '0755'
+
+- name: Configure offline APT repository (Ubuntu/Debian)
+  block:
+    - name: Add local repository to sources.list
+      lineinfile:
+        path: /etc/apt/sources.list
+        line: "deb [trusted=yes] file:///opt/offline-repos/ubuntu {{ ansible_distribution_release }} main restricted universe multiverse"
+        create: true
+        
+    - name: Comment out online repositories
+      replace:
+        path: /etc/apt/sources.list
+        regexp: '^(deb https?://.*)'
+        replace: '# \1'
+        
+    - name: Update package cache with offline repositories
+      apt:
+        update_cache: true
+      failed_when: false
+      
+  when: ansible_os_family == "Debian"
+
+- name: Configure offline YUM repository (RHEL/CentOS)
+  block:
+    - name: Create local YUM repository configuration
+      copy:
+        content: |
+          [local-base]
+          name=Local Base Repository
+          baseurl=file:///opt/offline-repos/rhel/base
+          enabled=1
+          gpgcheck=0
+          
+          [local-updates]
+          name=Local Updates Repository
+          baseurl=file:///opt/offline-repos/rhel/updates
+          enabled=1
+          gpgcheck=0
+        dest: /etc/yum.repos.d/local.repo
+        mode: '0644'
+        
+    - name: Disable online repositories
+      shell: |
+        find /etc/yum.repos.d/ -name "*.repo" -not -name "local.repo" -exec sed -i 's/enabled=1/enabled=0/g' {} \;
+      
+    - name: Clean YUM cache
+      shell: yum clean all
+      
+  when: ansible_os_family == "RedHat"
+
+- name: Configure DNS for local services
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      # Factory local services
+      {{ groups['offline_registry'][0] | default('192.168.100.20') }}  registry-01.factory.local
+      {{ groups['offline_registry'][1] | default('192.168.100.21') }}  registry-02.factory.local
+      192.168.100.22  charts.factory.local
+      
+      # Factory master nodes
+      {% for host in groups['masters'] %}
+      {{ hostvars[host]['ansible_default_ipv4']['address'] }}  {{ host }}.factory.local
+      {% endfor %}
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - Factory Services"
+
+- name: Configure local NTP server
+  template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    backup: true
+    mode: '0644'
+  notify: restart chronyd
+
+- name: Create offline mirror status check script
+  template:
+    src: check-offline-status.sh.j2
+    dest: /opt/check-offline-status.sh
+    mode: '0755'

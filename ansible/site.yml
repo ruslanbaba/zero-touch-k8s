@@ -1,0 +1,68 @@
+---
+- name: Zero-Touch Factory Floor Kubernetes Deployment
+  hosts: all
+  become: true
+  gather_facts: true
+  serial: 10  # Process 10 nodes at a time to avoid network congestion
+  
+  vars:
+    rke2_version: "v1.28.8+rke2r1"
+    offline_mode: true
+    local_registry: "registry-01.factory.local:5000"
+    airgap_images_dir: "/opt/rke2-artifacts"
+    
+  tasks:
+    - name: Include OS-specific variables
+      include_vars: "{{ ansible_os_family | lower }}.yml"
+      
+    - name: Verify system requirements
+      include_tasks: tasks/verify_requirements.yml
+      
+    - name: Configure offline package repositories
+      include_tasks: tasks/setup_offline_repos.yml
+      when: offline_mode | bool
+      
+    - name: Apply OS security patches
+      include_tasks: tasks/os_patching.yml
+      
+    - name: Setup container runtime
+      include_tasks: tasks/container_runtime.yml
+      
+    - name: Install RKE2 in airgap mode
+      include_tasks: tasks/install_rke2_airgap.yml
+      when: node_role is defined
+      
+    - name: Configure RKE2 masters
+      include_tasks: tasks/configure_masters.yml
+      when: node_role == "server"
+      
+    - name: Configure RKE2 workers
+      include_tasks: tasks/configure_workers.yml
+      when: node_role == "agent"
+      
+    - name: Setup local Helm chart repository
+      include_tasks: tasks/setup_helm_mirror.yml
+      when: inventory_hostname in groups['offline_registry']
+      
+    - name: Deploy factory applications
+      include_tasks: tasks/deploy_apps.yml
+      when: node_role == "agent"
+      
+    - name: Configure Anthos Config Management
+      include_tasks: tasks/setup_anthos.yml
+      when: node_role == "server" and inventory_hostname == groups['masters'][0]
+      
+  handlers:
+    - name: restart rke2-server
+      systemd:
+        name: rke2-server
+        state: restarted
+        daemon_reload: yes
+      when: node_role == "server"
+      
+    - name: restart rke2-agent
+      systemd:
+        name: rke2-agent
+        state: restarted
+        daemon_reload: yes
+      when: node_role == "agent"

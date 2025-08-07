@@ -1,0 +1,247 @@
+---
+# Deploy quality control and manufacturing applications
+- name: Wait for node to be ready
+  shell: /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get nodes {{ inventory_hostname }}
+  register: node_status
+  until: "'Ready' in node_status.stdout"
+  retries: 30
+  delay: 10
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Label nodes based on production line
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml label node {{ inventory_hostname }} \
+    production-line={{ production_line }} \
+    zone={{ zone }} \
+    factory-floor=true \
+    --overwrite
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Create factory namespace
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml create namespace factory-apps || true
+  run_once: true
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Deploy quality control application
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml apply -f - <<EOF
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: quality-control
+      namespace: factory-apps
+    spec:
+      selector:
+        matchLabels:
+          app: quality-control
+      template:
+        metadata:
+          labels:
+            app: quality-control
+        spec:
+          nodeSelector:
+            zone: quality-control
+          tolerations:
+          - key: factory-floor
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+          containers:
+          - name: qc-scanner
+            image: {{ local_registry }}/factory/quality-control:v1.2.3
+            imagePullPolicy: Always
+            ports:
+            - containerPort: 8080
+            env:
+            - name: PRODUCTION_LINE
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: SCANNER_MODE
+              value: "continuous"
+            volumeMounts:
+            - name: usb-devices
+              mountPath: /dev/bus/usb
+            - name: camera-devices
+              mountPath: /dev/video0
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "512Mi"
+                cpu: "500m"
+          volumes:
+          - name: usb-devices
+            hostPath:
+              path: /dev/bus/usb
+          - name: camera-devices
+            hostPath:
+              path: /dev/video0
+          hostNetwork: true
+    EOF
+  when: zone == "quality-control"
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Deploy assembly line monitoring
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml apply -f - <<EOF
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: assembly-monitor
+      namespace: factory-apps
+    spec:
+      selector:
+        matchLabels:
+          app: assembly-monitor
+      template:
+        metadata:
+          labels:
+            app: assembly-monitor
+        spec:
+          nodeSelector:
+            zone: assembly
+          tolerations:
+          - key: factory-floor
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+          containers:
+          - name: line-monitor
+            image: {{ local_registry }}/factory/assembly-monitor:v2.1.0
+            ports:
+            - containerPort: 9090
+            env:
+            - name: LINE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: METRICS_INTERVAL
+              value: "5"
+            volumeMounts:
+            - name: serial-devices
+              mountPath: /dev/ttyUSB0
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "256Mi"
+                cpu: "300m"
+          volumes:
+          - name: serial-devices
+            hostPath:
+              path: /dev/ttyUSB0
+    EOF
+  when: zone == "assembly"
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Deploy testing automation
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml apply -f - <<EOF
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: test-automation
+      namespace: factory-apps
+    spec:
+      selector:
+        matchLabels:
+          app: test-automation
+      template:
+        metadata:
+          labels:
+            app: test-automation
+        spec:
+          nodeSelector:
+            zone: testing
+          tolerations:
+          - key: factory-floor
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+          containers:
+          - name: automated-tester
+            image: {{ local_registry }}/factory/test-automation:v1.5.2
+            ports:
+            - containerPort: 7070
+            env:
+            - name: TEST_STATION_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: TEST_PROTOCOLS
+              value: "electrical,mechanical,thermal"
+            volumeMounts:
+            - name: test-equipment
+              mountPath: /dev/test-interface
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "512Mi"
+                cpu: "400m"
+          volumes:
+          - name: test-equipment
+            hostPath:
+              path: /dev/test-interface
+    EOF
+  when: zone == "testing"
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Deploy packaging automation
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml apply -f - <<EOF
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: packaging-automation
+      namespace: factory-apps
+    spec:
+      selector:
+        matchLabels:
+          app: packaging-automation
+      template:
+        metadata:
+          labels:
+            app: packaging-automation
+        spec:
+          nodeSelector:
+            zone: packaging
+          tolerations:
+          - key: factory-floor
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+          containers:
+          - name: package-controller
+            image: {{ local_registry }}/factory/packaging-automation:v1.3.1
+            ports:
+            - containerPort: 6060
+            env:
+            - name: PACKAGING_LINE
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: LABEL_PRINTER_IP
+              value: "192.168.{{ production_line | replace('A', '101') | replace('B', '102') | replace('C', '103') | replace('D', '104') }}.100"
+            volumeMounts:
+            - name: printer-spool
+              mountPath: /var/spool/printer
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+          volumes:
+          - name: printer-spool
+            hostPath:
+              path: /var/spool/printer
+    EOF
+  when: zone == "packaging"
+  delegate_to: "{{ groups['masters'][0] }}"

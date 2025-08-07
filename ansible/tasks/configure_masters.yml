@@ -1,0 +1,60 @@
+---
+# Configure master nodes
+- name: Wait for first master to be ready
+  wait_for:
+    port: 6443
+    host: "{{ ansible_default_ipv4.address }}"
+    timeout: 300
+  when: inventory_hostname == groups['masters'][0]
+
+- name: Wait for additional masters to join
+  wait_for:
+    port: 6443
+    host: "{{ groups['masters'][0] }}"
+    timeout: 300
+  when: inventory_hostname != groups['masters'][0]
+
+- name: Set up kubectl for admin user
+  file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    mode: '0755'
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Copy kubeconfig for admin user
+  copy:
+    src: /etc/rancher/rke2/rke2.yaml
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+
+- name: Update kubeconfig server address
+  replace:
+    path: "/home/{{ ansible_user }}/.kube/config"
+    regexp: 'https://127.0.0.1:6443'
+    replace: "https://{{ ansible_default_ipv4.address }}:6443"
+
+- name: Install kubectl bash completion
+  shell: |
+    /usr/local/bin/kubectl completion bash > /etc/bash_completion.d/kubectl
+  args:
+    creates: /etc/bash_completion.d/kubectl
+
+- name: Create kubectl alias
+  lineinfile:
+    path: "/home/{{ ansible_user }}/.bashrc"
+    line: "alias k=kubectl"
+    create: true
+
+- name: Wait for all masters to be ready
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get nodes --no-headers | grep master | grep -c Ready
+  register: ready_masters
+  until: ready_masters.stdout|int == groups['masters']|length
+  retries: 30
+  delay: 10
+  run_once: true
+  when: inventory_hostname == groups['masters'][0]

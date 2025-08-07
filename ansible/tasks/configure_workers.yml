@@ -1,0 +1,87 @@
+---
+# Configure worker nodes for factory operations
+- name: Wait for node to register with cluster
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get node {{ inventory_hostname }}
+  register: node_status
+  until: node_status.rc == 0
+  retries: 30
+  delay: 10
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Wait for node to be in Ready state
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml get node {{ inventory_hostname }} | grep -q " Ready "
+  register: node_ready
+  until: node_ready.rc == 0
+  retries: 30
+  delay: 10
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Label worker node with production line
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml label node {{ inventory_hostname }} \
+    production-line={{ production_line | default('unknown') }} \
+    zone={{ zone | default('general') }} \
+    factory-floor=true \
+    node-type=worker \
+    --overwrite
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Apply factory floor taint to worker nodes
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml taint node {{ inventory_hostname }} \
+    factory-floor=true:NoSchedule --overwrite
+  delegate_to: "{{ groups['masters'][0] }}"
+
+- name: Create device directories for factory equipment
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /opt/factory-devices
+    - /opt/factory-logs
+    - /opt/factory-data
+
+- name: Configure local storage for factory data
+  file:
+    path: /opt/local-path-provisioner
+    state: directory
+    mode: '0755'
+
+- name: Set up log rotation for factory applications
+  template:
+    src: factory-logrotate.j2
+    dest: /etc/logrotate.d/factory-apps
+    mode: '0644'
+
+- name: Configure factory workstation monitoring
+  template:
+    src: node-exporter.service.j2
+    dest: /etc/systemd/system/node-exporter.service
+    mode: '0644'
+  notify:
+    - reload systemd
+    - start node-exporter
+
+- name: Install factory-specific utilities
+  package:
+    name:
+      - socat      # For port forwarding
+      - tcpdump    # For network debugging
+      - iotop      # For I/O monitoring
+      - htop       # For process monitoring
+      - screen     # For session management
+    state: present
+
+- name: Configure factory workstation firewall
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "10250"    # Kubelet API
+    - "30000:32767"  # NodePort range
+    - "9100"     # Node exporter
+  when: ansible_os_family == "Debian"

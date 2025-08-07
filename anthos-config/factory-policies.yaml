@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-creds
+  namespace: config-management-system
+type: Opaque
+data:
+  # Base64 encoded SSH private key for Git repository access
+  # Generate with: base64 -w 0 ~/.ssh/factory_git_rsa
+  ssh: LS0tLS1CRUdJTiBPUEVOU1NIIFBSSVZBVEUgS0VZLS0tLS0KYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQkFBQUJGd0FBQUFkemMyZ3RjbgpOaEFBQUFBd0VBQVFBQUFRRUF0RkFDTEt2UnB3cWo4a05tNTR3VVpqVkxUZjdLN0JlZ05RNmVYbXIybWtnZk5rClJJSkZwQXZTM3M5ZnJ1YXZoQ3ROcHQ4azBjaGlnbXoxbVpva2kwcHdDdVJJYjZSeDFZZGg4b2tWRkQ3Q2pBQUFBCkZRRUVlU3JyUHhpSUJPV1FKUFRIT0k4QUFBQUFBQUFCZ2dBRElVQlJsUTBTTXZvWW5Pd2xHWnBxOEF3QUVFQUFFRQPBQEFBQUVBQUFGRUF0RkFDTEt2UnB3cWo4a05tNTR3VVpqVkxUZjdLN0JlZ05RNmVYbXIybWtnZk5rClJJSkZwQXZTM3M5ZnJ1YXZoQ3ROcHQ4azBjaGlnbXoxbVpva2kwcHdDdVJJYjZSeDFZZGg4b2tWRkQ3Q2pBQUFBCkZRRUVlU3JyUHhpSUJPV1FKUFRIO0k4QUFBQUFBQUFCdDhZS1VNbXFCOHhMUWIzMmVhZm1nQUFCQUFBQUJnZ0FESVUKYjNCbGJuTnphQzFyWlhrdGRqRUFBQUFBQkc1dmJtVUFBQUFFYm05dVpRQUFBQUFBQUFBQUFBQUJGd0FBQUFkemMyZ3QKTWNOc0FBQUFBd0VBQVFBQUFRRUF0RkFDTEt2UnB3cWo4a05tNTR3VVpqVkxUZjdLN0JlZ05RNmVYbXIybWtnZk5rClJJSkZwQXZTM3M5ZnJ1YXZoQ3ROcHQ4azBjaGlnbXoxbVpva2kwcHdDdVJJYjZSeDFZZGg4b2tWRkQ3Q2pBQUFBCkZRRUVlU3JyUHhpSUJPV1FKUFRIO0k4QUFBQUFBQUFCdDhZS1VNbXFCOHhMUWIzMmVhZm1nQUFCQUFBQUJnZ0FESVUKQlJsUTBTTXZvWW5Pd2xHWnBxOEF3QUFBQUFBQUFJREFBQUVCQUFCQUFBQVNIZ0o5ejNDVGl5VHRBUE1sQWV3QUFCQUFBQUFBQUVEQUFBQUEKAT09LS0tRU5EIE9QRU5TU0ggUFJJVkFURSBLRVktLS0tLQo=
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: factory-policies
+  namespace: config-management-system
+data:
+  # Factory-specific OPA Gatekeeper policies
+  factory-security-policy.yaml: |
+    apiVersion: templates.gatekeeper.sh/v1beta1
+    kind: ConstraintTemplate
+    metadata:
+      name: factorysecuritypolicy
+    spec:
+      crd:
+        spec:
+          names:
+            kind: FactorySecurityPolicy
+          validation:
+            properties:
+              allowedUsers:
+                type: array
+                items:
+                  type: string
+      targets:
+        - target: admission.k8s.gatekeeper.sh
+          rego: |
+            package factorysecuritypolicy
+            
+            violation[{"msg": msg}] {
+              input.review.object.kind == "Pod"
+              input.review.object.spec.securityContext.runAsUser != 1000
+              msg := "Factory pods must run as user 1000"
+            }
+  
+  production-line-isolation.yaml: |
+    apiVersion: templates.gatekeeper.sh/v1beta1
+    kind: ConstraintTemplate
+    metadata:
+      name: productionlineisolation
+    spec:
+      crd:
+        spec:
+          names:
+            kind: ProductionLineIsolation
+          validation:
+            properties:
+              allowedLines:
+                type: array
+                items:
+                  type: string
+      targets:
+        - target: admission.k8s.gatekeeper.sh
+          rego: |
+            package productionlineisolation
+            
+            violation[{"msg": msg}] {
+              input.review.object.kind == "Pod"
+              input.review.object.metadata.namespace == "factory-apps"
+              not line_allowed
+              msg := "Pod cannot be scheduled on this production line"
+            }
+            
+            line_allowed {
+              node_selector := input.review.object.spec.nodeSelector
+              production_line := node_selector["production-line"]
+              production_line in input.parameters.allowedLines
+            }

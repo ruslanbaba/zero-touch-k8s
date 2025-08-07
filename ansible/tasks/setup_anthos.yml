@@ -1,0 +1,146 @@
+---
+# Configure Google Cloud Anthos Config Management for GitOps
+- name: Create Anthos service account key directory
+  file:
+    path: /opt/anthos
+    state: directory
+    mode: '0700'
+
+- name: Copy Anthos service account key
+  copy:
+    src: "{{ anthos_sa_key_file | default('files/anthos-sa-key.json') }}"
+    dest: /opt/anthos/sa-key.json
+    mode: '0600'
+  when: anthos_sa_key_file is defined
+
+- name: Install Google Cloud SDK
+  shell: |
+    curl https://sdk.cloud.google.com | bash
+    exec -l $SHELL
+    /root/google-cloud-sdk/bin/gcloud auth activate-service-account --key-file=/opt/anthos/sa-key.json
+  args:
+    creates: /root/google-cloud-sdk
+
+- name: Download Anthos Config Management operator
+  get_url:
+    url: "https://github.com/GoogleCloudPlatform/anthos-config-management/releases/download/1.15.1/config-management-operator.yaml"
+    dest: /tmp/config-management-operator.yaml
+    mode: '0644'
+
+- name: Install Anthos Config Management operator
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml apply -f /tmp/config-management-operator.yaml
+
+- name: Wait for Config Management operator to be ready
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml wait --for=condition=Ready \
+    pod -l k8s-app=config-management-operator -n config-management-system --timeout=300s
+
+- name: Create ConfigManagement resource
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml apply -f - <<EOF
+    apiVersion: configmanagement.gke.io/v1
+    kind: ConfigManagement
+    metadata:
+      name: config-management
+      namespace: config-management-system
+    spec:
+      # Enable Config Sync for GitOps
+      enableMultiRepo: true
+      sourceFormat: hierarchy
+      
+      # Git repository containing factory configurations
+      git:
+        syncRepo: "{{ factory_config_repo | default('https://github.com/company/factory-k8s-config') }}"
+        syncBranch: "{{ factory_config_branch | default('main') }}"
+        secretType: "{{ git_secret_type | default('ssh') }}"
+        syncWait: 15
+        
+      # Policy Controller for security and compliance
+      policyController:
+        enabled: true
+        referentialRulesEnabled: true
+        logDeniesEnabled: true
+        mutationEnabled: true
+        monitoring:
+          backends:
+          - prometheus
+        
+      # Hierarchy Controller for namespace inheritance
+      hierarchyController:
+        enabled: true
+        enablePodTreeLabels: true
+        enableHierarchicalResourceQuota: true
+    EOF
+
+- name: Create Git credentials secret for Config Sync
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml create secret generic git-creds \
+    --namespace=config-management-system \
+    --from-file=ssh=/opt/anthos/git-ssh-key \
+    --dry-run=client -o yaml | kubectl apply -f -
+  when: git_secret_type == "ssh"
+
+- name: Create factory-specific namespaces with Config Sync
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml apply -f - <<EOF
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: factory-production
+      labels:
+        environment: production
+        managed-by: anthos-config-sync
+    ---
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: factory-monitoring
+      labels:
+        environment: production
+        managed-by: anthos-config-sync
+    ---
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: factory-security
+      labels:
+        environment: production
+        managed-by: anthos-config-sync
+    EOF
+
+- name: Deploy factory-specific policies
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml apply -f - <<EOF
+    apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
+    kind: Kustomization
+    metadata:
+      name: factory-policies
+      namespace: config-management-system
+    spec:
+      interval: 1m
+      path: "./factory-policies"
+      prune: true
+      sourceRef:
+        kind: GitRepository
+        name: factory-config
+      validation: client
+    EOF
+
+- name: Create monitoring for Config Sync status
+  shell: |
+    /usr/local/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml apply -f - <<EOF
+    apiVersion: v1
+    kind: ServiceMonitor
+    metadata:
+      name: config-sync-monitoring
+      namespace: config-management-system
+    spec:
+      selector:
+        matchLabels:
+          app: reconciler-manager
+      endpoints:
+      - port: metrics
+        interval: 30s
+        path: /metrics
+    EOF

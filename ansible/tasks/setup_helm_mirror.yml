@@ -1,0 +1,121 @@
+---
+# Setup local Helm chart repository for air-gapped factory environment
+- name: Install Docker for container registry
+  package:
+    name: docker.io
+    state: present
+
+- name: Start and enable Docker
+  systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Add admin user to docker group
+  user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: true
+
+- name: Create registry directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /opt/registry/data
+    - /opt/registry/certs
+    - /opt/helm-charts
+    - /opt/registry/auth
+
+- name: Generate self-signed certificate for registry
+  command: |
+    openssl req -newkey rsa:4096 -nodes -sha256 -keyout /opt/registry/certs/domain.key \
+    -x509 -days 365 -out /opt/registry/certs/domain.crt \
+    -subj "/C=US/ST=Factory/L=Production/O=Manufacturing/OU=IT/CN={{ ansible_fqdn }}"
+  args:
+    creates: /opt/registry/certs/domain.crt
+
+- name: Create htpasswd file for registry authentication
+  htpasswd:
+    path: /opt/registry/auth/htpasswd
+    name: admin
+    password: "{{ registry_password | default('factory123') }}"
+    crypt_scheme: bcrypt
+
+- name: Run Docker registry container
+  docker_container:
+    name: factory-registry
+    image: registry:2.8
+    state: started
+    restart_policy: always
+    ports:
+      - "5000:5000"
+    volumes:
+      - "/opt/registry/data:/var/lib/registry"
+      - "/opt/registry/certs:/certs"
+      - "/opt/registry/auth:/auth"
+    env:
+      REGISTRY_HTTP_TLS_CERTIFICATE: "/certs/domain.crt"
+      REGISTRY_HTTP_TLS_KEY: "/certs/domain.key"
+      REGISTRY_AUTH: "htpasswd"
+      REGISTRY_AUTH_HTPASSWD_REALM: "Registry Realm"
+      REGISTRY_AUTH_HTPASSWD_PATH: "/auth/htpasswd"
+
+- name: Install Helm
+  get_url:
+    url: "https://get.helm.sh/helm-v3.12.3-linux-amd64.tar.gz"
+    dest: "/tmp/helm.tar.gz"
+    mode: '0644'
+
+- name: Extract Helm binary
+  unarchive:
+    src: "/tmp/helm.tar.gz"
+    dest: "/tmp"
+    remote_src: true
+
+- name: Install Helm binary
+  copy:
+    src: "/tmp/linux-amd64/helm"
+    dest: "/usr/local/bin/helm"
+    mode: '0755'
+    remote_src: true
+
+- name: Create Helm chart mirror script
+  template:
+    src: helm-mirror.sh.j2
+    dest: /opt/helm-mirror.sh
+    mode: '0755'
+
+- name: Mirror essential Helm charts for factory applications
+  shell: |
+    /opt/helm-mirror.sh
+  args:
+    creates: /opt/helm-charts/mirrored.flag
+
+- name: Setup ChartMuseum for serving Helm charts
+  docker_container:
+    name: chartmuseum
+    image: chartmuseum/chartmuseum:v0.15.0
+    state: started
+    restart_policy: always
+    ports:
+      - "8080:8080"
+    volumes:
+      - "/opt/helm-charts:/charts"
+    env:
+      DEBUG: "1"
+      STORAGE: "local"
+      STORAGE_LOCAL_ROOTDIR: "/charts"
+      PORT: "8080"
+
+- name: Create registry certificate distribution script
+  template:
+    src: distribute-certs.sh.j2
+    dest: /opt/distribute-certs.sh
+    mode: '0755'
+
+- name: Distribute registry certificates to all nodes
+  shell: /opt/distribute-certs.sh
+  run_once: true
+  delegate_to: "{{ groups['offline_registry'][0] }}"

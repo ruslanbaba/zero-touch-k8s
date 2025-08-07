@@ -1,0 +1,125 @@
+# RKE2 Cluster Configuration for Factory Floor
+# This file contains cluster-wide settings and parameters
+
+# Cluster Information
+cluster:
+  name: "factory-floor-k8s"
+  environment: "production"
+  location: "factory-datacenter"
+  version: "v1.28.8+rke2r1"
+
+# Network Configuration
+networking:
+  cluster_cidr: "10.42.0.0/16"
+  service_cidr: "10.43.0.0/16"
+  cluster_dns: "10.43.0.10"
+  plugin: "canal"  # Default CNI for RKE2
+
+# Security Settings
+security:
+  profile: "cis-1.6"
+  secrets_encryption: true
+  protect_kernel_defaults: true
+  
+# Audit Configuration
+audit:
+  enabled: true
+  log_path: "/var/log/kube-audit.log"
+  log_maxage: 30
+  log_maxbackup: 10
+  log_maxsize: 100
+
+# etcd Configuration
+etcd:
+  snapshot_schedule: "0 2 * * *"  # Daily at 2 AM
+  snapshot_retention: 30
+  snapshot_dir: "/var/lib/rancher/rke2/db/snapshots"
+  quota_backend_bytes: 8589934592  # 8GB
+  auto_compaction_retention: 12
+
+# Disable unnecessary components for factory environment
+disabled_components:
+  - servicelb  # Using MetalLB instead
+  - traefik    # Using NGINX ingress
+
+# Factory-specific node taints and labels
+node_config:
+  master_taints:
+    - "node-role.kubernetes.io/master=true:NoSchedule"
+  worker_taints:
+    - "factory-floor=true:NoSchedule"
+  default_labels:
+    - "environment=production"
+    - "location=factory-floor"
+
+# Resource limits for factory workloads
+resource_limits:
+  max_pods_per_node: 50
+  node_status_update_frequency: "10s"
+  image_gc_high_threshold: 80
+  image_gc_low_threshold: 60
+
+# Registry configuration for air-gapped environment
+registry:
+  mirrors:
+    docker.io:
+      endpoint: 
+        - "https://registry-01.factory.local:5000"
+    registry.k8s.io:
+      endpoint:
+        - "https://registry-01.factory.local:5000"
+    quay.io:
+      endpoint:
+        - "https://registry-01.factory.local:5000"
+  configs:
+    registry-01.factory.local:5000:
+      auth:
+        username: "admin"
+        password: "factory123"
+      tls:
+        insecure_skip_verify: false
+        ca_file: "/etc/ssl/certs/factory-registry.crt"
+
+# Backup and disaster recovery
+backup:
+  etcd_backup_schedule: "0 2 * * *"
+  backup_retention_days: 30
+  backup_location: "/opt/backups/etcd"
+  
+# Monitoring configuration
+monitoring:
+  enabled: true
+  node_exporter: true
+  kube_state_metrics: true
+  prometheus_retention: "30d"
+  
+# Factory production lines configuration
+production_lines:
+  line_a:
+    zone: "quality-control"
+    subnet: "192.168.101.0/24"
+    node_count: 50
+    applications:
+      - "quality-control"
+      - "vision-inspection"
+  line_b:
+    zone: "assembly"
+    subnet: "192.168.102.0/24"
+    node_count: 50
+    applications:
+      - "assembly-monitor"
+      - "line-control"
+  line_c:
+    zone: "testing"
+    subnet: "192.168.103.0/24"
+    node_count: 50
+    applications:
+      - "test-automation"
+      - "equipment-interface"
+  line_d:
+    zone: "packaging"
+    subnet: "192.168.104.0/24"
+    node_count: 50
+    applications:
+      - "packaging-automation"
+      - "label-printing"

@@ -1,0 +1,32 @@
+#!/bin/bash
+# Distribute registry certificates to all factory nodes
+
+set -euo pipefail
+
+CERT_SOURCE="/opt/registry/certs/domain.crt"
+INVENTORY_FILE="{{ ansible_dir | default('/opt/zero-touch-k8s/ansible') }}/inventory.yml"
+
+# Get all node IPs from inventory
+NODES=$(ansible all -i "$INVENTORY_FILE" --list-hosts | grep -v "hosts (" | tr -d ' ')
+
+for node in $NODES; do
+    echo "Distributing certificate to $node..."
+    
+    # Copy certificate to node
+    scp -i ~/.ssh/factory_rsa "$CERT_SOURCE" admin@"$node":/tmp/registry.crt
+    
+    # Install certificate
+    ssh -i ~/.ssh/factory_rsa admin@"$node" << 'EOF'
+        sudo mkdir -p /etc/docker/certs.d/registry-01.factory.local:5000
+        sudo cp /tmp/registry.crt /etc/docker/certs.d/registry-01.factory.local:5000/ca.crt
+        sudo mkdir -p /usr/local/share/ca-certificates
+        sudo cp /tmp/registry.crt /usr/local/share/ca-certificates/factory-registry.crt
+        sudo update-ca-certificates
+        sudo systemctl restart containerd
+        rm /tmp/registry.crt
+EOF
+    
+    echo "Certificate installed on $node"
+done
+
+echo "Certificate distribution completed"

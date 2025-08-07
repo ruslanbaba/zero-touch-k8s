@@ -1,0 +1,74 @@
+# RKE2 Registry Configuration for Air-Gapped Factory Environment
+
+mirrors:
+  # Docker Hub mirror
+  docker.io:
+    endpoint:
+      - "https://registry-01.factory.local:5000"
+      - "https://registry-02.factory.local:5000"
+    rewrite:
+      "^rancher/(.*)": "factory/$1"
+      "^library/(.*)": "factory/library/$1"
+
+  # Kubernetes registry mirror
+  registry.k8s.io:
+    endpoint:
+      - "https://registry-01.factory.local:5000"
+    rewrite:
+      "^(.*)": "factory/k8s/$1"
+
+  # Quay.io mirror
+  quay.io:
+    endpoint:
+      - "https://registry-01.factory.local:5000"
+    rewrite:
+      "^(.*)": "factory/quay/$1"
+
+  # Google Container Registry mirror
+  gcr.io:
+    endpoint:
+      - "https://registry-01.factory.local:5000"
+    rewrite:
+      "^(.*)": "factory/gcr/$1"
+
+  # GitHub Container Registry mirror
+  ghcr.io:
+    endpoint:
+      - "https://registry-01.factory.local:5000"
+    rewrite:
+      "^(.*)": "factory/ghcr/$1"
+
+configs:
+  # Primary factory registry
+  "registry-01.factory.local:5000":
+    auth:
+      username: "admin"
+      password: "factory123"
+    tls:
+      cert_file: "/etc/ssl/certs/registry-01.crt"
+      key_file: "/etc/ssl/private/registry-01.key"
+      ca_file: "/etc/ssl/certs/factory-ca.crt"
+      insecure_skip_verify: false
+
+  # Secondary factory registry
+  "registry-02.factory.local:5000":
+    auth:
+      username: "admin"
+      password: "factory123"
+    tls:
+      cert_file: "/etc/ssl/certs/registry-02.crt"
+      key_file: "/etc/ssl/private/registry-02.key"
+      ca_file: "/etc/ssl/certs/factory-ca.crt"
+      insecure_skip_verify: false
+
+# Image pull policies for factory environment
+auths:
+  "registry-01.factory.local:5000":
+    username: "admin"
+    password: "factory123"
+    auth: "YWRtaW46ZmFjdG9yeTEyMw=="  # base64(admin:factory123)
+    
+  "registry-02.factory.local:5000":
+    username: "admin"
+    password: "factory123"
+    auth: "YWRtaW46ZmFjdG9yeTEyMw=="  # base64(admin:factory123)

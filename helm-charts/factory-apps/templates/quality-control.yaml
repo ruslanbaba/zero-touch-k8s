@@ -1,0 +1,76 @@
+{{- if .Values.productionLines.lineA.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "factory-apps.fullname" . }}-quality-control
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "factory-apps.labels" . | nindent 4 }}
+    app.kubernetes.io/component: quality-control
+    production-line: "A"
+spec:
+  selector:
+    matchLabels:
+      {{- include "factory-apps.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: quality-control
+  template:
+    metadata:
+      labels:
+        {{- include "factory-apps.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: quality-control
+        production-line: "A"
+    spec:
+      nodeSelector:
+        {{- toYaml .Values.productionLines.lineA.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      containers:
+      - name: qc-scanner
+        image: "{{ .Values.global.registry }}/{{ .Values.productionLines.lineA.applications.qualityControl.image }}:{{ .Values.productionLines.lineA.applications.qualityControl.tag }}"
+        imagePullPolicy: {{ .Values.global.pullPolicy }}
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PRODUCTION_LINE
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: SCANNER_MODE
+          value: "continuous"
+        - name: METRICS_ENDPOINT
+          value: "http://prometheus:9090"
+        volumeMounts:
+        - name: usb-devices
+          mountPath: /dev/bus/usb
+        - name: camera-devices
+          mountPath: /dev/video0
+        - name: factory-data
+          mountPath: /app/data
+        resources:
+          {{- toYaml .Values.productionLines.lineA.applications.qualityControl.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: usb-devices
+        hostPath:
+          path: /dev/bus/usb
+      - name: camera-devices
+        hostPath:
+          path: /dev/video0
+      - name: factory-data
+        hostPath:
+          path: /opt/factory-data
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+{{- end }}

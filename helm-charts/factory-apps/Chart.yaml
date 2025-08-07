@@ -1,0 +1,32 @@
+apiVersion: v2
+name: factory-apps
+description: Factory Floor Applications for Manufacturing Automation
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - factory
+  - manufacturing
+  - automation
+  - quality-control
+  - assembly
+  - testing
+  - packaging
+home: https://github.com/company/factory-k8s
+sources:
+  - https://github.com/company/factory-k8s
+maintainers:
+  - name: Factory DevOps Team
+    email: factory-devops@company.com
+dependencies:
+  - name: postgresql
+    version: "12.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "17.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: prometheus
+    version: "15.x.x"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: monitoring.enabled

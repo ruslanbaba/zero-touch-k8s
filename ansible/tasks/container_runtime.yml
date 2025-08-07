@@ -1,0 +1,74 @@
+---
+# Configure container runtime for factory environment
+- name: Install containerd
+  package:
+    name: containerd
+    state: present
+
+- name: Create containerd configuration directory
+  file:
+    path: /etc/containerd
+    state: directory
+    mode: '0755'
+
+- name: Generate default containerd configuration
+  shell: containerd config default > /etc/containerd/config.toml
+  args:
+    creates: /etc/containerd/config.toml
+
+- name: Configure containerd for systemd cgroup driver
+  lineinfile:
+    path: /etc/containerd/config.toml
+    regexp: '^\s*SystemdCgroup\s*='
+    line: '            SystemdCgroup = true'
+    insertafter: '^\s*\[plugins\."io\.containerd\.grpc\.v1\.cri"\.containerd\.runtimes\.runc\.options\]'
+
+- name: Configure containerd registry mirrors for air-gapped environment
+  blockinfile:
+    path: /etc/containerd/config.toml
+    insertafter: '^\s*\[plugins\."io\.containerd\.grpc\.v1\.cri"\.registry\]'
+    block: |
+      [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
+          endpoint = ["https://{{ local_registry }}"]
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.k8s.io"]
+          endpoint = ["https://{{ local_registry }}"]
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."quay.io"]
+          endpoint = ["https://{{ local_registry }}"]
+      [plugins."io.containerd.grpc.v1.cri".registry.configs]
+        [plugins."io.containerd.grpc.v1.cri".registry.configs."{{ local_registry }}".tls]
+          insecure_skip_verify = true
+        [plugins."io.containerd.grpc.v1.cri".registry.configs."{{ local_registry }}".auth]
+          username = "admin"
+          password = "{{ registry_password | default('factory123') }}"
+  when: offline_mode | bool
+
+- name: Enable and start containerd
+  systemd:
+    name: containerd
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Install crictl for container debugging
+  get_url:
+    url: "https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.28.0/crictl-v1.28.0-linux-amd64.tar.gz"
+    dest: /tmp/crictl.tar.gz
+    mode: '0644'
+
+- name: Extract crictl
+  unarchive:
+    src: /tmp/crictl.tar.gz
+    dest: /usr/local/bin/
+    remote_src: true
+    creates: /usr/local/bin/crictl
+
+- name: Configure crictl
+  copy:
+    content: |
+      runtime-endpoint: unix:///run/containerd/containerd.sock
+      image-endpoint: unix:///run/containerd/containerd.sock
+      timeout: 10
+      debug: false
+    dest: /etc/crictl.yaml
+    mode: '0644'

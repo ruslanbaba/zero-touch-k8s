@@ -1,0 +1,54 @@
+# RKE2 Server Configuration for Factory Floor Masters
+server: https://{{ groups['masters'][0] }}:9345
+token: {{ rke2_token | default('factory-k8s-super-secret-token-change-me') }}
+{% if offline_mode %}
+system-default-registry: {{ local_registry }}
+{% endif %}
+
+# Network configuration for factory environment
+cluster-cidr: 10.42.0.0/16
+service-cidr: 10.43.0.0/16
+cluster-dns: 10.43.0.10
+
+# Node taints and labels for factory workstations
+node-taint:
+  - "factory-floor=true:NoSchedule"
+node-label:
+  - "environment=production"
+  - "location=factory-floor"
+  - "production-line={{ production_line | default('unknown') }}"
+  - "zone={{ zone | default('general') }}"
+
+# Disable components not needed in factory environment
+disable:
+  - servicelb  # We'll use MetalLB for load balancing
+  - traefik    # We'll use NGINX ingress
+
+# Security settings for manufacturing environment
+protect-kernel-defaults: true
+secrets-encryption: true
+
+# Audit logging for compliance
+audit-policy-file: /etc/rancher/rke2/audit-policy.yaml
+
+# Container runtime settings
+container-runtime-endpoint: unix:///run/k3s/containerd/containerd.sock
+
+# Kubelet configuration for factory workstations
+kubelet-arg:
+  - "max-pods=50"  # Limit pods per node for stability
+  - "node-status-update-frequency=10s"
+  - "image-gc-high-threshold=80"
+  - "image-gc-low-threshold=60"
+
+# API server configuration
+kube-apiserver-arg:
+  - "audit-log-maxage=30"
+  - "audit-log-maxbackup=10"
+  - "audit-log-maxsize=100"
+  - "audit-log-path=/var/log/kube-audit.log"
+
+# etcd configuration for data persistence
+etcd-arg:
+  - "quota-backend-bytes=8589934592"  # 8GB
+  - "auto-compaction-retention=12"

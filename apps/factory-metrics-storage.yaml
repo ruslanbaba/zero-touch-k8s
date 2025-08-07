@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: factory-metrics-db
+  namespace: factory-monitoring
+spec:
+  serviceName: "factory-metrics-db"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: factory-metrics-db
+  template:
+    metadata:
+      labels:
+        app: factory-metrics-db
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/master: "true"
+      containers:
+      - name: postgres
+        image: registry-01.factory.local:5000/postgres:13-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_DB
+          value: factory_metrics
+        - name: POSTGRES_USER
+          value: metrics_user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 50Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: factory-monitoring
+spec:
+  selector:
+    app: factory-metrics-db
+  ports:
+  - port: 5432
+    targetPort: 5432
+  clusterIP: None
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: factory-monitoring
+type: Opaque
+data:
+  password: ZmFjdG9yeV9kYl9wYXNzd29yZF8xMjM=  # factory_db_password_123

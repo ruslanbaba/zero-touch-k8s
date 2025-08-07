@@ -1,0 +1,232 @@
+---
+# Verify system requirements for factory floor deployment
+- name: Check minimum CPU requirements
+  assert:
+    that:
+      - ansible_processor_vcpus >= 4
+    fail_msg: "Minimum 4 CPU cores required, found {{ ansible_processor_vcpus }}"
+    success_msg: "CPU requirements met: {{ ansible_processor_vcpus }} cores"
+
+- name: Check minimum memory requirements (worker nodes)
+  assert:
+    that:
+      - ansible_memtotal_mb >= 7680  # 8GB minimum
+    fail_msg: "Minimum 8GB RAM required, found {{ ansible_memtotal_mb }}MB"
+    success_msg: "Memory requirements met: {{ ansible_memtotal_mb }}MB"
+  when: node_role == "agent"
+
+- name: Check minimum memory requirements (master nodes)
+  assert:
+    that:
+      - ansible_memtotal_mb >= 15360  # 16GB minimum
+    fail_msg: "Minimum 16GB RAM required for masters, found {{ ansible_memtotal_mb }}MB"
+    success_msg: "Memory requirements met: {{ ansible_memtotal_mb }}MB"
+  when: node_role == "server"
+
+- name: Check disk space requirements
+  assert:
+    that:
+      - item.size_available > 50000000000  # 50GB minimum
+    fail_msg: "Minimum 50GB free space required on {{ item.mount }}"
+    success_msg: "Disk space requirements met on {{ item.mount }}"
+  loop: "{{ ansible_mounts }}"
+  when: item.mount == "/" or item.mount == "/var"
+
+- name: Verify supported operating system
+  assert:
+    that:
+      - ansible_os_family in ["Debian", "RedHat"]
+      - (ansible_os_family == "Debian" and ansible_distribution_major_version|int >= 20) or
+        (ansible_os_family == "RedHat" and ansible_distribution_major_version|int >= 8)
+    fail_msg: "Unsupported OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    success_msg: "Supported OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+- name: Check Python version
+  assert:
+    that:
+      - ansible_python_version is version('3.6', '>=')
+    fail_msg: "Python 3.6+ required, found {{ ansible_python_version }}"
+    success_msg: "Python version supported: {{ ansible_python_version }}"
+
+- name: Verify SSH connectivity
+  wait_for_connection:
+    timeout: 30
+
+- name: Check sudo privileges
+  become: true
+  command: whoami
+  register: sudo_check
+  changed_when: false
+
+- name: Verify sudo access
+  assert:
+    that:
+      - sudo_check.stdout == "root"
+    fail_msg: "Sudo access required for deployment user"
+    success_msg: "Sudo access verified"
+
+- name: Check network connectivity to master nodes
+  wait_for:
+    host: "{{ item }}"
+    port: 22
+    timeout: 10
+  loop: "{{ groups['masters'] | map('extract', hostvars, 'ansible_host') | list }}"
+  when: inventory_hostname not in groups['masters']
+
+- name: Verify time synchronization
+  shell: timedatectl status | grep "synchronized.*yes"
+  register: time_sync
+  failed_when: time_sync.rc != 0
+  changed_when: false
+
+- name: Check for swap usage
+  shell: swapon --show
+  register: swap_check
+  changed_when: false
+  failed_when: false
+
+- name: Warning about swap usage
+  debug:
+    msg: "WARNING: Swap is enabled. Kubernetes requires swap to be disabled."
+  when: swap_check.stdout != ""
+
+- name: Verify container runtime prerequisites
+  package_facts:
+    manager: auto
+
+- name: Check for conflicting container runtimes
+  fail:
+    msg: "Docker is installed. RKE2 uses containerd. Please remove Docker first."
+  when: "'docker.io' in ansible_facts.packages or 'docker-ce' in ansible_facts.packages"
+
+- name: Check required kernel modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+  become: true
+
+- name: Verify kernel version for container support
+  assert:
+    that:
+      - ansible_kernel is version('4.15', '>=')
+    fail_msg: "Kernel 4.15+ required for container support, found {{ ansible_kernel }}"
+    success_msg: "Kernel version supported: {{ ansible_kernel }}"
+
+- name: Check for required ports availability
+  wait_for:
+    port: "{{ item }}"
+    state: stopped
+    timeout: 1
+  loop:
+    - 6443   # Kubernetes API
+    - 10250  # Kubelet API
+    - 2379   # etcd client (masters only)
+    - 2380   # etcd peer (masters only)
+  failed_when: false
+  register: port_check
+
+- name: Report port conflicts
+  debug:
+    msg: "WARNING: Port {{ item.item }} appears to be in use"
+  loop: "{{ port_check.results }}"
+  when: item.failed is defined and not item.failed
+
+- name: Check factory-specific hardware requirements
+  block:
+    - name: Verify USB devices for quality control
+      stat:
+        path: /dev/bus/usb
+      register: usb_devices
+      
+    - name: Check for camera devices
+      stat:
+        path: /dev/video0
+      register: camera_device
+      
+    - name: Verify serial ports for equipment interface
+      stat:
+        path: /dev/ttyUSB0
+      register: serial_port
+      
+    - name: Report factory hardware status
+      debug:
+        msg: |
+          Factory hardware check:
+          - USB devices: {{ 'Available' if usb_devices.stat.exists else 'Not found' }}
+          - Camera devices: {{ 'Available' if camera_device.stat.exists else 'Not found' }}
+          - Serial ports: {{ 'Available' if serial_port.stat.exists else 'Not found' }}
+  when: node_role == "agent"
+
+- name: Validate network configuration
+  block:
+    - name: Check DNS resolution
+      shell: nslookup {{ item }}
+      loop:
+        - "{{ groups['masters'][0] }}"
+        - registry-01.factory.local
+      failed_when: false
+      register: dns_check
+      
+    - name: Report DNS issues
+      debug:
+        msg: "WARNING: DNS resolution failed for {{ item.item }}"
+      loop: "{{ dns_check.results }}"
+      when: item.rc != 0
+
+- name: Create requirements validation summary
+  debug:
+    msg: |
+      System Requirements Validation Complete:
+      - CPU: {{ ansible_processor_vcpus }} cores ✓
+      - Memory: {{ ansible_memtotal_mb }}MB ✓
+      - OS: {{ ansible_distribution }} {{ ansible_distribution_version }} ✓
+      - Kernel: {{ ansible_kernel }} ✓
+      - Python: {{ ansible_python_version }} ✓
+      - Role: {{ node_role | default('undefined') }}
+      - Production Line: {{ production_line | default('N/A') }}
+      - Zone: {{ zone | default('N/A') }}
+    that:
+      - ansible_processor_vcpus >= 4
+    fail_msg: "Insufficient CPU cores: {{ ansible_processor_vcpus }} found, 4 cores required"
+
+- name: Check available disk space (100GB required)
+  assert:
+    that:
+      - item.size_available > 107374182400  # 100GB in bytes
+    fail_msg: "Insufficient disk space on {{ item.mount }}: {{ (item.size_available/1024/1024/1024)|round(1) }}GB available, 100GB required"
+  loop: "{{ ansible_mounts }}"
+  when: item.mount == '/'
+
+- name: Verify network connectivity to local registry
+  uri:
+    url: "https://{{ local_registry }}/v2/"
+    method: GET
+    validate_certs: false
+  register: registry_check
+  failed_when: registry_check.status != 200
+  when: offline_mode | bool
+
+- name: Check for required network interfaces
+  assert:
+    that:
+      - ansible_default_ipv4.interface is defined
+    fail_msg: "No default network interface found"
+
+- name: Verify time synchronization
+  shell: chrony sources -v
+  register: time_sync
+  failed_when: "'*' not in time_sync.stdout"
+  changed_when: false
+
+- name: Check for hardware compatibility
+  shell: |
+    # Check for virtualization support
+    grep -E '(vmx|svm)' /proc/cpuinfo || echo "no_virt"
+    # Check for required kernel modules
+    modprobe br_netfilter
+    modprobe overlay
+  register: hw_check
+  changed_when: false

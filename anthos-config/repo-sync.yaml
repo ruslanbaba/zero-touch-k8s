@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: factory-gitops
+  labels:
+    name: factory-gitops
+    managed-by: anthos-config-sync
+---
+apiVersion: configsync.gke.io/v1beta1
+kind: RootSync
+metadata:
+  name: factory-config-root
+  namespace: config-management-system
+spec:
+  sourceFormat: unstructured
+  git:
+    repo: https://github.com/company/factory-k8s-config
+    branch: main
+    dir: "/"
+    auth: ssh
+    secretRef:
+      name: git-creds
+  override:
+    statusMode: enabled
+    reconcileTimeout: 300s
+    apiServerTimeout: 15s
+---
+apiVersion: configsync.gke.io/v1beta1
+kind: RepoSync
+metadata:
+  name: factory-apps-config
+  namespace: factory-apps
+spec:
+  sourceFormat: unstructured
+  git:
+    repo: https://github.com/company/factory-apps-config
+    branch: production
+    dir: "/apps"
+    auth: ssh
+    secretRef:
+      name: git-creds
+  override:
+    statusMode: enabled
+    reconcileTimeout: 180s

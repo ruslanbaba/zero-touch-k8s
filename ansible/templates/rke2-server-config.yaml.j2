@@ -1,0 +1,83 @@
+# RKE2 Master Server Configuration for Factory Floor
+{% if inventory_hostname == groups['masters'][0] %}
+# First master node - cluster bootstrap
+cluster-init: true
+{% else %}
+# Additional master nodes
+server: https://{{ groups['masters'][0] }}:9345
+{% endif %}
+
+token: {{ rke2_token | default('factory-k8s-super-secret-token-change-me') }}
+
+# Bind to all interfaces for factory network access
+bind-address: 0.0.0.0
+advertise-address: {{ ansible_default_ipv4.address }}
+
+{% if offline_mode %}
+# Air-gapped configuration
+system-default-registry: {{ local_registry }}
+{% endif %}
+
+# Network configuration optimized for factory environment
+cluster-cidr: 10.42.0.0/16
+service-cidr: 10.43.0.0/16
+cluster-dns: 10.43.0.10
+
+# Disable unnecessary components for lean deployment
+disable:
+  - servicelb  # Using MetalLB instead
+  - traefik    # Using NGINX ingress
+
+# Security hardening for production environment
+protect-kernel-defaults: true
+secrets-encryption: true
+profile: cis-1.6
+
+# High availability etcd configuration
+etcd-snapshot-schedule-cron: "0 2 * * *"  # Daily backups at 2 AM
+etcd-snapshot-retention: 30
+etcd-snapshot-dir: /var/lib/rancher/rke2/db/snapshots
+
+# Audit logging for manufacturing compliance
+audit-policy-file: /etc/rancher/rke2/audit-policy.yaml
+
+# Node configuration
+node-label:
+  - "node-role.kubernetes.io/master=true"
+  - "environment=production"
+  - "location=factory-datacenter"
+
+node-taint:
+  - "node-role.kubernetes.io/master=true:NoSchedule"
+
+# API server settings for factory integration
+kube-apiserver-arg:
+  - "audit-log-maxage=30"
+  - "audit-log-maxbackup=10"
+  - "audit-log-maxsize=100"
+  - "audit-log-path=/var/log/kube-audit.log"
+  - "enable-admission-plugins=NodeRestriction,ResourceQuota,PodSecurityPolicy"
+
+# Controller manager settings
+kube-controller-manager-arg:
+  - "node-monitor-period=5s"
+  - "node-monitor-grace-period=40s"
+  - "pod-eviction-timeout=300s"
+
+# Scheduler configuration for factory workloads
+kube-scheduler-arg:
+  - "v=2"
+
+# Kubelet settings for master nodes
+kubelet-arg:
+  - "max-pods=110"
+  - "node-status-update-frequency=10s"
+  - "serialize-image-pulls=false"
+
+# etcd configuration for high availability
+etcd-arg:
+  - "quota-backend-bytes=8589934592"  # 8GB
+  - "max-request-bytes=33554432"      # 32MB
+  - "auto-compaction-retention=12"
+  - "heartbeat-interval=250"
+  - "election-timeout=2500"

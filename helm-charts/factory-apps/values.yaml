@@ -1,0 +1,182 @@
+# Factory Applications Configuration
+
+# Global settings
+global:
+  registry: "registry-01.factory.local:5000"
+  imageTag: "latest"
+  pullPolicy: "Always"
+  namespace: "factory-apps"
+
+# Production line configuration
+productionLines:
+  lineA:
+    enabled: true
+    zone: "quality-control"
+    nodeSelector:
+      production-line: "A"
+      zone: "quality-control"
+    applications:
+      qualityControl:
+        enabled: true
+        replicas: 1
+        image: "factory/quality-control"
+        tag: "v1.2.3"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+  lineB:
+    enabled: true
+    zone: "assembly"
+    nodeSelector:
+      production-line: "B"
+      zone: "assembly"
+    applications:
+      assemblyMonitor:
+        enabled: true
+        replicas: 1
+        image: "factory/assembly-monitor"
+        tag: "v2.1.0"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "300m"
+            
+  lineC:
+    enabled: true
+    zone: "testing"
+    nodeSelector:
+      production-line: "C"
+      zone: "testing"
+    applications:
+      testAutomation:
+        enabled: true
+        replicas: 1
+        image: "factory/test-automation"
+        tag: "v1.5.2"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "400m"
+            
+  lineD:
+    enabled: true
+    zone: "packaging"
+    nodeSelector:
+      production-line: "D"
+      zone: "packaging"
+    applications:
+      packagingAutomation:
+        enabled: true
+        replicas: 1
+        image: "factory/packaging-automation"
+        tag: "v1.3.1"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+
+# Infrastructure applications
+infrastructure:
+  dashboard:
+    enabled: true
+    image: "factory/qc-dashboard"
+    tag: "v1.0.0"
+    nodeSelector:
+      node-role.kubernetes.io/master: "true"
+    service:
+      type: "ClusterIP"
+      port: 80
+      targetPort: 3000
+    ingress:
+      enabled: true
+      hostname: "qc-dashboard.factory.local"
+      
+  monitoring:
+    enabled: true
+    prometheus:
+      enabled: true
+      retention: "30d"
+      storage: "50Gi"
+    grafana:
+      enabled: true
+      adminPassword: "factory_admin_password"
+
+# Database configuration
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "factory_db_password_123"
+    username: "metrics_user"
+    password: "metrics_password"
+    database: "factory_metrics"
+  primary:
+    persistence:
+      enabled: true
+      size: "50Gi"
+      storageClass: "factory-storage"
+
+# Cache configuration
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: "redis_password_123"
+  master:
+    persistence:
+      enabled: true
+      size: "10Gi"
+      storageClass: "factory-storage"
+
+# Security settings
+security:
+  networkPolicies:
+    enabled: true
+  podSecurityPolicy:
+    enabled: true
+  rbac:
+    enabled: true
+    
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  retention: "30d"
+  storage:
+    size: "100Gi"
+    storageClass: "factory-storage"
+
+# Factory-specific tolerations
+tolerations:
+  - key: "factory-floor"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+  - key: "node-role.kubernetes.io/master"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Factory-specific labels
+labels:
+  environment: "production"
+  location: "factory-floor"
+  managed-by: "helm"
+  
+# Annotations
+annotations:
+  deployment.kubernetes.io/revision: "1"
+  factory.company.com/version: "1.0.0"

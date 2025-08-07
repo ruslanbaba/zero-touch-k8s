@@ -1,0 +1,52 @@
+---
+all:
+  vars:
+    ansible_user: admin
+    ansible_ssh_private_key_file: ~/.ssh/factory_rsa
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+  children:
+    masters:
+      hosts:
+        factory-master-01:
+          ansible_host: 192.168.100.10
+          node_role: server
+        factory-master-02:
+          ansible_host: 192.168.100.11
+          node_role: server
+        factory-master-03:
+          ansible_host: 192.168.100.12
+          node_role: server
+    workers:
+      hosts:
+        # Production Line A - 50 workstations
+        line-a-ws-[001:050]:
+          ansible_host: 192.168.101.[10:59]
+          node_role: agent
+          production_line: A
+          zone: quality-control
+        # Production Line B - 50 workstations
+        line-b-ws-[001:050]:
+          ansible_host: 192.168.102.[10:59]
+          node_role: agent
+          production_line: B
+          zone: assembly
+        # Production Line C - 50 workstations
+        line-c-ws-[001:050]:
+          ansible_host: 192.168.103.[10:59]
+          node_role: agent
+          production_line: C
+          zone: testing
+        # Production Line D - 50 workstations
+        line-d-ws-[001:050]:
+          ansible_host: 192.168.104.[10:59]
+          node_role: agent
+          production_line: D
+          zone: packaging
+    offline_registry:
+      hosts:
+        registry-01:
+          ansible_host: 192.168.100.20
+          registry_role: primary
+        registry-02:
+          ansible_host: 192.168.100.21
+          registry_role: secondary

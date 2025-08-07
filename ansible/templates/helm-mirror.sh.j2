@@ -1,0 +1,49 @@
+#!/bin/bash
+# Mirror essential Helm charts for factory environment
+
+set -euo pipefail
+
+CHART_REPO_URL="http://localhost:8080"
+CHARTS_DIR="/opt/helm-charts"
+MIRROR_FLAG="$CHARTS_DIR/mirrored.flag"
+
+# Essential charts for factory operations
+CHARTS=(
+    "stable/prometheus"
+    "stable/grafana" 
+    "stable/postgresql"
+    "stable/redis"
+    "stable/nginx-ingress"
+    "stable/cert-manager"
+    "stable/metallb"
+    "bitnami/postgresql"
+    "bitnami/redis"
+    "prometheus-community/kube-prometheus-stack"
+    "grafana/grafana"
+    "ingress-nginx/ingress-nginx"
+    "jetstack/cert-manager"
+)
+
+# Add Helm repositories
+helm repo add stable https://charts.helm.sh/stable
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo add jetstack https://charts.jetstack.io
+
+# Update repositories
+helm repo update
+
+# Mirror charts
+mkdir -p "$CHARTS_DIR"
+cd "$CHARTS_DIR"
+
+for chart in "${CHARTS[@]}"; do
+    echo "Downloading chart: $chart"
+    helm pull "$chart" --untar
+done
+
+# Create flag file
+touch "$MIRROR_FLAG"
+echo "Chart mirroring completed at $(date)" >> "$MIRROR_FLAG"

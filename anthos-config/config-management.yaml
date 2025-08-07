@@ -1,0 +1,48 @@
+apiVersion: configmanagement.gke.io/v1
+kind: ConfigManagement
+metadata:
+  name: config-management
+  namespace: config-management-system
+spec:
+  # Enable Config Sync for GitOps
+  enableMultiRepo: true
+  sourceFormat: hierarchy
+  
+  # Git repository containing factory configurations
+  git:
+    syncRepo: "https://github.com/company/factory-k8s-config"
+    syncBranch: "main"
+    secretType: "ssh"
+    syncWait: 15
+    syncRev: "HEAD"
+    policyDir: "."
+    
+  # Policy Controller for security and compliance
+  policyController:
+    enabled: true
+    referentialRulesEnabled: true
+    logDeniesEnabled: true
+    mutationEnabled: true
+    monitoring:
+      backends:
+      - prometheus
+    templateLibraryInstalled: true
+    exemptableNamespaces:
+    - kube-system
+    - config-management-system
+    
+  # Hierarchy Controller for namespace inheritance
+  hierarchyController:
+    enabled: true
+    enablePodTreeLabels: true
+    enableHierarchicalResourceQuota: true
+    
+  # Config Connector for GCP resource management
+  configConnector:
+    enabled: false  # Disabled for air-gapped environment
+    
+  # Cluster configuration
+  cluster:
+    name: "factory-floor-k8s"
+    environment: "production"
+    location: "factory-floor"
