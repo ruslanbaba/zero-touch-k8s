@@ -1,0 +1,148 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zero-trust-policies
+  namespace: security-system
+data:
+  admission-policy.yaml: |
+    apiVersion: config.gatekeeper.sh/v1alpha1
+    kind: Config
+    metadata:
+      name: config
+      namespace: gatekeeper-system
+    spec:
+      match:
+        - excludedNamespaces: ["kube-system", "gatekeeper-system"]
+          processes: ["*"]
+      validation:
+        traces:
+          - user:
+              kind:
+                group: "user"
+        audit:
+          logLevel: "INFO"
+      
+  network-segmentation.yaml: |
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: factory-line-isolation
+      namespace: factory-apps
+    spec:
+      podSelector:
+        matchLabels:
+          app: factory-workload
+      policyTypes:
+      - Ingress
+      - Egress
+      ingress:
+      - from:
+        - namespaceSelector:
+            matchLabels:
+              name: factory-apps
+        - podSelector:
+            matchLabels:
+              production-line: "{{ .Values.productionLine }}"
+        ports:
+        - protocol: TCP
+          port: 8080
+      egress:
+      - to:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+        ports:
+        - protocol: TCP
+          port: 9090
+      - to: []
+        ports:
+        - protocol: DNS
+          port: 53
+  
+  pod-security-standards.yaml: |
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: factory-apps
+      labels:
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/audit: restricted
+        pod-security.kubernetes.io/warn: restricted
+    
+  workload-identity.yaml: |
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: factory-workload-sa
+      namespace: factory-apps
+      annotations:
+        iam.gke.io/gcp-service-account: factory-workload@project.iam.gserviceaccount.com
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      namespace: factory-apps
+      name: factory-workload-role
+    rules:
+    - apiGroups: [""]
+      resources: ["configmaps", "secrets"]
+      verbs: ["get", "list"]
+    - apiGroups: ["apps"]
+      resources: ["deployments"]
+      verbs: ["get", "list", "update"]
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: factory-workload-binding
+      namespace: factory-apps
+    subjects:
+    - kind: ServiceAccount
+      name: factory-workload-sa
+      namespace: factory-apps
+    roleRef:
+      kind: Role
+      name: factory-workload-role
+      apiGroup: rbac.authorization.k8s.io
+
+  secrets-management.yaml: |
+    apiVersion: external-secrets.io/v1beta1
+    kind: SecretStore
+    metadata:
+      name: vault-backend
+      namespace: factory-apps
+    spec:
+      provider:
+        vault:
+          server: "https://vault.factory.local:8200"
+          path: "factory"
+          version: "v2"
+          auth:
+            kubernetes:
+              mountPath: "kubernetes"
+              role: "factory-role"
+              serviceAccountRef:
+                name: "vault-auth"
+    ---
+    apiVersion: external-secrets.io/v1beta1
+    kind: ExternalSecret
+    metadata:
+      name: factory-credentials
+      namespace: factory-apps
+    spec:
+      refreshInterval: 15s
+      secretStoreRef:
+        name: vault-backend
+        kind: SecretStore
+      target:
+        name: factory-app-secrets
+        creationPolicy: Owner
+      data:
+      - secretKey: database-password
+        remoteRef:
+          key: factory/database
+          property: password
+      - secretKey: api-key
+        remoteRef:
+          key: factory/api
+          property: key

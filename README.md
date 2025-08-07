@@ -155,7 +155,7 @@ graph LR
 ### Application Deployment Flow
 
 ```mermaid
-sequenceNumber
+sequenceDiagram
     participant DEV as Developer
     participant GIT as Git Repository
     participant ACM as Anthos Config Mgmt

@@ -1,0 +1,81 @@
+name: Factory Applications CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['apps/**', 'helm-charts/**']
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY_URL: factory-registry.local:5000
+  KUBECONFIG_SECRET: FACTORY_KUBECONFIG
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  build-and-push:
+    needs: security-scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [quality-control, assembly-monitor, test-automation, packaging-automation]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Build and export to Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/${{ matrix.app }}
+          load: true
+          tags: ${{ env.REGISTRY_URL }}/${{ matrix.app }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          
+      - name: Run container security scan
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $HOME/Library/Caches:/root/.cache/ \
+            aquasec/trivy image ${{ env.REGISTRY_URL }}/${{ matrix.app }}:${{ github.sha }}
+
+  deploy-to-factory:
+    if: github.ref == 'refs/heads/main'
+    needs: [build-and-push]
+    runs-on: [self-hosted, factory-runner]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update Helm values
+        run: |
+          sed -i "s/tag: .*/tag: ${{ github.sha }}/g" helm-charts/factory-apps/values.yaml
+          
+      - name: Deploy with ArgoCD
+        run: |
+          argocd app sync factory-apps --prune --timeout 600
+          argocd app wait factory-apps --timeout 600
+
+  post-deploy-tests:
+    needs: deploy-to-factory
+    runs-on: [self-hosted, factory-runner]
+    steps:
+      - name: Run smoke tests
+        run: |
+          kubectl run smoke-test --image=curlimages/curl --rm -i --restart=Never -- \
+            sh -c "curl -f http://quality-control.factory-apps.svc.cluster.local:8080/health"

@@ -1,0 +1,376 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-portal
+  namespace: argocd
+spec:
+  project: factory-platform
+  source:
+    repoURL: https://github.com/your-org/factory-platform-portal
+    targetRevision: HEAD
+    path: helm-chart
+    helm:
+      values: |
+        portal:
+          image:
+            repository: factory-registry.local:5000/platform-portal
+            tag: v1.0.0
+          
+          config:
+            title: "Factory Floor Platform Portal"
+            description: "Self-service platform for factory applications and infrastructure"
+            
+            # Service catalog configuration
+            serviceCatalog:
+              enabled: true
+              templates:
+                - name: "Factory Application"
+                  description: "Deploy a new factory line application"
+                  template: "factory-app-template"
+                  parameters:
+                    - name: "appName"
+                      type: "string"
+                      required: true
+                      description: "Application name"
+                    - name: "productionLine"
+                      type: "select"
+                      options: ["A", "B", "C", "D"]
+                      required: true
+                    - name: "replicas"
+                      type: "number"
+                      default: 3
+                      min: 1
+                      max: 10
+                    - name: "resources"
+                      type: "object"
+                      properties:
+                        cpu: 
+                          type: "string"
+                          default: "100m"
+                        memory:
+                          type: "string"
+                          default: "128Mi"
+                
+                - name: "Monitoring Dashboard"
+                  description: "Create custom monitoring dashboard"
+                  template: "monitoring-dashboard-template"
+                  parameters:
+                    - name: "dashboardName"
+                      type: "string"
+                      required: true
+                    - name: "productionLine"
+                      type: "select"
+                      options: ["A", "B", "C", "D", "All"]
+                    - name: "metrics"
+                      type: "array"
+                      items:
+                        type: "string"
+                      default: ["cpu", "memory", "throughput"]
+                
+                - name: "Development Environment"
+                  description: "Provision temporary development environment"
+                  template: "dev-environment-template"
+                  parameters:
+                    - name: "environmentName"
+                      type: "string"
+                      required: true
+                    - name: "duration"
+                      type: "select"
+                      options: ["1h", "4h", "8h", "24h"]
+                      default: "4h"
+                    - name: "resources"
+                      type: "select"
+                      options: ["small", "medium", "large"]
+                      default: "medium"
+            
+            # Resource quotas and policies
+            resourceManagement:
+              enabled: true
+              quotas:
+                factory-apps:
+                  cpu: "10"
+                  memory: "20Gi"
+                  persistentvolumeclaims: "10"
+                dev-environments:
+                  cpu: "5"
+                  memory: "10Gi"
+                  persistentvolumeclaims: "5"
+              
+              policies:
+                - name: "Resource Limits"
+                  description: "Enforce resource limits on all workloads"
+                  type: "opa-gatekeeper"
+                  policy: |
+                    package main
+                    
+                    violation[{"msg": msg}] {
+                      input.review.object.kind == "Pod"
+                      not input.review.object.spec.containers[_].resources.limits
+                      msg := "All containers must have resource limits defined"
+                    }
+                
+                - name: "Production Line Isolation"
+                  description: "Ensure workloads are properly isolated by production line"
+                  type: "network-policy"
+                  policy: |
+                    apiVersion: networking.k8s.io/v1
+                    kind: NetworkPolicy
+                    metadata:
+                      name: production-line-isolation
+                    spec:
+                      podSelector:
+                        matchLabels:
+                          app: factory-workload
+                      policyTypes:
+                      - Ingress
+                      - Egress
+                      ingress:
+                      - from:
+                        - podSelector:
+                            matchLabels:
+                              production-line: "{{ .ProductionLine }}"
+            
+            # Cost management
+            costManagement:
+              enabled: true
+              budgets:
+                - name: "Factory Apps Monthly"
+                  amount: 5000
+                  currency: "USD"
+                  period: "monthly"
+                  alerts:
+                    - threshold: 80
+                      type: "email"
+                      recipients: ["factory-ops@company.com"]
+                    - threshold: 95
+                      type: "slack"
+                      webhook: "{{ .SlackWebhookURL }}"
+              
+              showCosts: true
+              costCategories:
+                - compute
+                - storage
+                - network
+                - licenses
+            
+            # Compliance and governance
+            governance:
+              enabled: true
+              approvals:
+                production:
+                  required: true
+                  approvers: ["factory-lead", "security-team"]
+                  policies:
+                    - "security-scan-passed"
+                    - "resource-limits-defined"
+                    - "backup-strategy-defined"
+                development:
+                  required: false
+                  autoApprove: true
+              
+              auditLog:
+                enabled: true
+                retention: "90d"
+                events:
+                  - "application-deployed"
+                  - "resource-created"
+                  - "environment-provisioned"
+                  - "approval-granted"
+        
+        # Backstage configuration for developer portal
+        backstage:
+          enabled: true
+          image:
+            repository: factory-registry.local:5000/backstage
+            tag: v1.15.0
+          
+          config:
+            app:
+              title: "Factory Platform Portal"
+              baseUrl: "https://portal.factory.local"
+            
+            integrations:
+              github:
+                - host: github.com
+                  token: "${GITHUB_TOKEN}"
+              
+              gitlab:
+                - host: gitlab.factory.local
+                  token: "${GITLAB_TOKEN}"
+            
+            catalog:
+              import:
+                entityFilename: catalog-info.yaml
+                pullRequestBranchName: backstage-integration
+              rules:
+                - allow: [Component, System, API, Resource, Location]
+              locations:
+                - type: file
+                  target: /app/catalog/factory-components.yaml
+                - type: url
+                  target: https://github.com/your-org/factory-catalog/blob/main/catalog.yaml
+            
+            kubernetes:
+              serviceLocatorMethod:
+                type: 'multiTenant'
+              clusterLocatorMethods:
+                - type: 'config'
+                  clusters:
+                    - url: "https://kubernetes.factory.local:6443"
+                      name: factory-cluster
+                      authProvider: 'serviceAccount'
+                      serviceAccountToken: "${K8S_SERVICE_ACCOUNT_TOKEN}"
+            
+            techdocs:
+              builder: 'local'
+              generator:
+                runIn: 'docker'
+              publisher:
+                type: 'local'
+        
+        # ArgoCD configuration for GitOps
+        argocd:
+          enabled: true
+          server:
+            extraArgs:
+              - --insecure
+            config:
+              repositories: |
+                - type: git
+                  url: https://github.com/your-org/factory-applications
+                - type: git
+                  url: https://github.com/your-org/factory-infrastructure
+                - type: helm
+                  url: https://charts.factory.local
+                  name: factory-charts
+              
+              resource.customizations.health.argoproj.io_Application: |
+                hs = {}
+                hs.status = "Progressing"
+                hs.message = ""
+                if obj.status ~= nil then
+                  if obj.status.health ~= nil then
+                    hs.status = obj.status.health.status
+                    if obj.status.health.message ~= nil then
+                      hs.message = obj.status.health.message
+                    end
+                  end
+                end
+                return hs
+          
+          applicationSet:
+            enabled: true
+            generators:
+              - clusters: {}
+              - git:
+                  repoURL: https://github.com/your-org/factory-applications
+                  revision: HEAD
+                  directories:
+                    - path: "*/production-line-*"
+        
+        # Internal developer platform tools
+        developerTools:
+          enabled: true
+          tools:
+            - name: "kubectl"
+              description: "Kubernetes CLI tool"
+              type: "cli"
+              downloadUrl: "https://tools.factory.local/kubectl"
+            
+            - name: "helm"
+              description: "Kubernetes package manager"
+              type: "cli"
+              downloadUrl: "https://tools.factory.local/helm"
+            
+            - name: "factory-cli"
+              description: "Factory-specific CLI tool"
+              type: "cli"
+              downloadUrl: "https://tools.factory.local/factory-cli"
+              documentation: "https://docs.factory.local/cli"
+            
+            - name: "VS Code Extensions"
+              description: "Recommended VS Code extensions for factory development"
+              type: "ide-extension"
+              extensions:
+                - "ms-kubernetes-tools.vscode-kubernetes-tools"
+                - "redhat.vscode-yaml"
+                - "ms-vscode.vscode-json"
+        
+        # Self-healing and automation
+        automation:
+          enabled: true
+          workflows:
+            - name: "Auto-scale Applications"
+              trigger: "metric-threshold"
+              conditions:
+                - metric: "cpu_usage_percent"
+                  threshold: 80
+                  duration: "5m"
+              actions:
+                - type: "scale-deployment"
+                  parameters:
+                    maxReplicas: 10
+                    scaleUpReplicas: 2
+            
+            - name: "Certificate Rotation"
+              trigger: "schedule"
+              schedule: "0 2 * * 0"  # Weekly on Sunday 2 AM
+              actions:
+                - type: "run-script"
+                  script: "/scripts/maintenance.sh rotate-certs"
+            
+            - name: "Security Scan"
+              trigger: "git-push"
+              conditions:
+                - branch: "main"
+                - path: "apps/*"
+              actions:
+                - type: "security-scan"
+                - type: "notify-slack"
+                  channel: "#security-alerts"
+                  condition: "scan-failed"
+        
+        # Multi-tenancy support
+        tenancy:
+          enabled: true
+          isolation: "namespace"
+          tenants:
+            - name: "production-line-a"
+              namespace: "factory-line-a"
+              quotas:
+                cpu: "4"
+                memory: "8Gi"
+              users:
+                - "line-a-operator"
+                - "line-a-engineer"
+            
+            - name: "production-line-b"
+              namespace: "factory-line-b"
+              quotas:
+                cpu: "4"
+                memory: "8Gi"
+              users:
+                - "line-b-operator"
+                - "line-b-engineer"
+        
+        # Observability integration
+        observability:
+          prometheus:
+            enabled: true
+            endpoint: "http://prometheus.monitoring.svc.cluster.local:9090"
+          
+          grafana:
+            enabled: true
+            endpoint: "http://grafana.monitoring.svc.cluster.local:3000"
+          
+          jaeger:
+            enabled: true
+            endpoint: "http://jaeger-query.monitoring.svc.cluster.local:16686"
+          
+          customDashboards:
+            - name: "Platform Overview"
+              panels:
+                - "Resource Utilization"
+                - "Application Health"
+                - "Cost Breakdown"
+                - "Security Status"

@@ -1,0 +1,178 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sre-observability-config
+  namespace: monitoring
+data:
+  prometheus-rules.yaml: |
+    groups:
+    - name: factory.slos
+      rules:
+      # Factory Application Availability SLO: 99.5%
+      - record: factory:slo_availability_ratio
+        expr: |
+          (
+            sum(rate(http_requests_total{job="factory-apps",code!~"5.."}[5m])) /
+            sum(rate(http_requests_total{job="factory-apps"}[5m]))
+          )
+      
+      # Factory Application Latency SLO: 95% < 200ms
+      - record: factory:slo_latency_ratio
+        expr: |
+          (
+            histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job="factory-apps"}[5m])) by (le))
+          )
+      
+      # Production Line Throughput SLO: 95% target
+      - record: factory:slo_throughput_ratio
+        expr: |
+          (
+            sum(rate(production_items_completed_total[5m])) by (production_line) /
+            sum(rate(production_items_target_total[5m])) by (production_line)
+          )
+      
+      # Error Budget Alerts
+      - alert: FactoryAvailabilitySLOBreach
+        expr: factory:slo_availability_ratio < 0.995
+        for: 2m
+        labels:
+          severity: critical
+          slo: availability
+        annotations:
+          summary: "Factory availability SLO breached"
+          description: "Factory application availability is {{ $value | humanizePercentage }}, below 99.5% SLO"
+          
+      - alert: FactoryLatencySLOBreach
+        expr: factory:slo_latency_ratio > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          slo: latency
+        annotations:
+          summary: "Factory latency SLO breached"
+          description: "Factory application 95th percentile latency is {{ $value }}s, above 200ms SLO"
+          
+      - alert: ProductionLineThroughputSLOBreach
+        expr: factory:slo_throughput_ratio < 0.95
+        for: 10m
+        labels:
+          severity: warning
+          slo: throughput
+        annotations:
+          summary: "Production line throughput below SLO"
+          description: "Production line {{ $labels.production_line }} throughput is {{ $value | humanizePercentage }}, below 95% SLO"
+
+  grafana-dashboards.yaml: |
+    factory-sre-dashboard:
+      json: |
+        {
+          "dashboard": {
+            "title": "Factory SRE Dashboard",
+            "panels": [
+              {
+                "title": "SLO Compliance",
+                "type": "stat",
+                "targets": [
+                  {
+                    "expr": "factory:slo_availability_ratio",
+                    "legendFormat": "Availability SLO"
+                  },
+                  {
+                    "expr": "1 - (factory:slo_latency_ratio / 0.2)",
+                    "legendFormat": "Latency SLO"
+                  },
+                  {
+                    "expr": "avg(factory:slo_throughput_ratio)",
+                    "legendFormat": "Throughput SLO"
+                  }
+                ]
+              },
+              {
+                "title": "Error Budget Burn Rate",
+                "type": "graph",
+                "targets": [
+                  {
+                    "expr": "rate(factory_errors_total[1h]) / rate(factory_requests_total[1h])",
+                    "legendFormat": "1h burn rate"
+                  },
+                  {
+                    "expr": "rate(factory_errors_total[24h]) / rate(factory_requests_total[24h])",
+                    "legendFormat": "24h burn rate"
+                  }
+                ]
+              },
+              {
+                "title": "Production Line Efficiency",
+                "type": "heatmap",
+                "targets": [
+                  {
+                    "expr": "factory:slo_throughput_ratio",
+                    "legendFormat": "{{ production_line }}"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+
+  alertmanager-config.yaml: |
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'factory-ops'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'factory-critical'
+      - match:
+          severity: warning
+        receiver: 'factory-warning'
+    
+    receivers:
+    - name: 'factory-ops'
+      slack_configs:
+      - api_url: '{{ .SlackWebhookURL }}'
+        channel: '#factory-ops'
+        title: 'Factory Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        
+    - name: 'factory-critical'
+      slack_configs:
+      - api_url: '{{ .SlackWebhookURL }}'
+        channel: '#factory-critical'
+        title: 'CRITICAL: Factory Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ .Annotations.description }}{{ end }}'
+      pagerduty_configs:
+      - service_key: '{{ .PagerDutyServiceKey }}'
+        description: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+        
+    - name: 'factory-warning'
+      slack_configs:
+      - api_url: '{{ .SlackWebhookURL }}'
+        channel: '#factory-alerts'
+        title: 'Warning: Factory Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+  jaeger-config.yaml: |
+    apiVersion: jaegertracing.io/v1
+    kind: Jaeger
+    metadata:
+      name: factory-tracing
+      namespace: monitoring
+    spec:
+      storage:
+        type: elasticsearch
+        elasticsearch:
+          nodeCount: 3
+          redundancyPolicy: SingleRedundancy
+      collector:
+        maxReplicas: 5
+        resources:
+          limits:
+            memory: 128Mi
+      query:
+        resources:
+          limits:
+            memory: 128Mi
