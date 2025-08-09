@@ -1,10 +1,10 @@
 # Zero-Touch Factory Floor Kubernetes
 
-🏭 **Automated Air-Gapped RKE2 Kubernetes Deployment for Manufacturing Environments**
+ **Automated Air-Gapped RKE2 Kubernetes Deployment for Manufacturing Environments**
 
 A comprehensive solution for deploying and managing Kubernetes clusters across 200+ manufacturing workstations in air-gapped factory environments. Features automated OS patching with Ansible, local container registry mirrors, Helm chart repositories, and Google Cloud Anthos Config Management for GitOps-driven operations.
 
-## 📋 Table of Contents
+##  Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
@@ -19,7 +19,7 @@ A comprehensive solution for deploying and managing Kubernetes clusters across 2
 - [Security](#security)
 - [Contributing](#contributing)
 
-## 🔍 Overview
+##  Overview
 
 This project implements a zero-touch Kubernetes deployment solution specifically designed for manufacturing environments where:
 
@@ -38,7 +38,7 @@ This project implements a zero-touch Kubernetes deployment solution specifically
 ✅ **Automated Maintenance** - Scheduled OS patching and application updates with minimal downtime  
 ✅ **Multi-Line Support** - Isolated production lines with dedicated workstation groups  
 
-## 🏗️ Architecture
+##  Architecture
 
 ### High-Level Architecture
 
@@ -173,39 +173,39 @@ sequenceDiagram
     ACM->>GIT: Commit status
 ```
 
-## ✨ Features
+##  Features
 
-### 🚀 Automated Deployment
+###  Automated Deployment
 - **Zero-touch provisioning** of 200+ workstations across 4 production lines
 - **Parallel deployment** with configurable batch sizes to minimize production impact
 - **Health checks and validation** at each deployment stage
 - **Rollback capabilities** for failed deployments
 
-### 🔒 Air-Gapped Operation
+###  Air-Gapped Operation
 - **Local container registry** with automatic image mirroring and caching
 - **Offline Helm chart repository** using ChartMuseum
 - **Local package mirrors** for OS updates and software installation
 - **Certificate management** for secure inter-node communication
 
-### 🛠️ Automated Maintenance
+###  Automated Maintenance
 - **Scheduled OS patching** during maintenance windows (Sunday 2-6 AM)
 - **Rolling updates** with production line isolation
 - **Automatic certificate rotation** for security compliance
 - **etcd backup automation** with configurable retention policies
 
-### 📊 Monitoring & Observability
+###  Monitoring & Observability
 - **Real-time cluster monitoring** with Prometheus and Grafana
 - **Application metrics** collection from factory floor applications
 - **Audit logging** for compliance and security requirements
 - **Alerting integration** for critical system events
 
-### 🔄 GitOps Integration
+###  GitOps Integration
 - **Anthos Config Management** for declarative cluster configuration
 - **Git-based configuration** with automatic sync and validation
 - **Policy enforcement** using OPA Gatekeeper
 - **Multi-environment support** (dev, staging, production)
 
-## 📋 Prerequisites
+##  Prerequisites
 
 ### Hardware Requirements
 
@@ -257,7 +257,7 @@ python3 for Ansible
   - 10250/tcp (kubelet)
   - 30000-32767/tcp (NodePort services)
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Clone and Prepare
 
@@ -320,7 +320,7 @@ kubectl get pods -n factory-apps
 kubectl get configmanagement -n config-management-system
 ```
 
-## 🔧 Detailed Setup
+##  Detailed Setup
 
 ### Phase 1: Infrastructure Preparation
 
@@ -503,7 +503,7 @@ spec:
     logDeniesEnabled: true
 ```
 
-## ⚙️ Configuration
+##  Configuration
 
 ### Environment Variables
 
@@ -571,7 +571,7 @@ factory_apps:
         cpu: "500m"
 ```
 
-## 🔄 Operations
+##  Operations
 
 ### Daily Operations
 
@@ -678,7 +678,7 @@ ansible all -i ansible/inventory.yml \
   --become
 ```
 
-## 📊 Monitoring
+##  Monitoring
 
 ### Prometheus Metrics
 
@@ -739,7 +739,7 @@ groups:
       summary: "High defect rate on line {{ $labels.production_line }}"
 ```
 
-## 🛠️ Troubleshooting
+##  Troubleshooting
 
 ### Common Issues
 
@@ -849,7 +849,7 @@ echo 'net.ipv4.tcp_wmem = 4096 65536 67108864' >> /etc/sysctl.conf
 sysctl -p
 ```
 
-## 🔐 Security
+##  Security
 
 ### Security Hardening
 
@@ -945,9 +945,9 @@ rules:
     resources: ["pods/exec", "pods/portforward"]
 ```
 
-## 🤝 Contributing
+##  Contributing
 
-We welcome contributions to improve the Zero-Touch Factory Floor Kubernetes solution!
+ Contributions are welcome to improve the Zero-Touch Factory Floor Kubernetes solution
 
 ### Development Setup
 
@@ -978,16 +978,13 @@ pytest tests/
 ### Reporting Issues
 
 Please use GitHub Issues for:
-- 🐛 Bug reports with reproduction steps
-- 💡 Feature requests with use case descriptions
-- 📚 Documentation improvements
-- ❓ Questions about deployment or configuration
+-  Bug reports with reproduction steps
+- Feature requests with use case descriptions
+-  Documentation improvements
+-  Questions about deployment or configuration
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🏆 Acknowledgments
 
@@ -995,7 +992,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Google Cloud** for Anthos Config Management
 - **Ansible Community** for automation frameworks
 - **Factory Automation Engineers** for real-world testing and feedback
-
----
-
-**Built with ❤️ for manufacturing excellence**
